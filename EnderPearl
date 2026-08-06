@@ -1,0 +1,261 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Debris = game:GetService("Debris")
+
+local LocalPlayer = Players.LocalPlayer
+if not LocalPlayer then
+    local lpSignal = Players:GetPropertyChangedSignal("LocalPlayer")
+    while not Players.LocalPlayer do
+        lpSignal:Wait()
+    end
+    LocalPlayer = Players.LocalPlayer
+end
+
+local function characterParts()
+    local character = LocalPlayer.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    return character, humanoid, root
+end
+
+local function playThrowSound(pos)
+    local s = Instance.new("Sound")
+    s.SoundId = "rbxassetid://122316559217923"
+    s.Volume = 1.2
+    s.RollOffMode = Enum.RollOffMode.Linear
+    s.Parent = workspace
+    pcall(function() s:Play() end)
+    Debris:AddItem(s, 4)
+end
+
+local function playTeleportSound(pos)
+    local sounds = {"rbxassetid://107970332989639", "rbxassetid://98197310564972"}
+    local chosen = sounds[math.random(1, #sounds)]
+    local s = Instance.new("Sound")
+    s.SoundId = chosen
+    s.Volume = 1.2
+    s.RollOffMode = Enum.RollOffMode.Linear
+    s.Parent = workspace
+    pcall(function() s:Play() end)
+    Debris:AddItem(s, 4)
+end
+
+local function doEnderTeleport(hitPos, pearlInstance, hitConn, rayConn)
+    if not pearlInstance or not pearlInstance.Parent then return end
+    if rayConn then
+        pcall(function() rayConn:Disconnect() end)
+    end
+    if hitConn then
+        pcall(function() hitConn:Disconnect() end)
+    end
+    pcall(function() pearlInstance.Touched:Disconnect() end)
+
+    local _, _, root = characterParts()
+    if root then
+        local tpPos = hitPos + Vector3.new(0, 3.5, 0)
+        local params = RaycastParams.new()
+        params.FilterDescendantsInstances = {pearlInstance, LocalPlayer.Character}
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        local upCheck = workspace:Raycast(tpPos, Vector3.new(0, 2, 0), params)
+        if upCheck then tpPos = upCheck.Position - Vector3.new(0, 2, 0) end
+        root.CFrame = CFrame.new(tpPos)
+        root.AssemblyLinearVelocity = Vector3.zero
+        root.AssemblyAngularVelocity = Vector3.zero
+        playTeleportSound(tpPos)
+
+        local fxPart = Instance.new("Part")
+        fxPart.Anchored = true
+        fxPart.CanCollide = false
+        fxPart.Transparency = 1
+        fxPart.Size = Vector3.new(1, 1, 1)
+        fxPart.Position = tpPos
+        fxPart.Parent = workspace
+
+        local emit = Instance.new("ParticleEmitter")
+        emit.Texture = "rbxassetid://15637521267"
+        emit.Color = ColorSequence.new(Color3.new(1, 1, 1))
+        emit.Lifetime = NumberRange.new(0.5, 0.8)
+        emit.Rate = 0
+        emit.Speed = NumberRange.new(12, 18)
+        emit.SpreadAngle = Vector2.new(180, 180)
+        emit.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 1.4), NumberSequenceKeypoint.new(1, 0)})
+        emit.Parent = fxPart
+        emit:Emit(35)
+        Debris:AddItem(fxPart, 1.2)
+    end
+
+    pcall(function() pearlInstance:Destroy() end)
+end
+
+local function throwEnderPearl(tool)
+    local _, humanoid, root = characterParts()
+    local camera = workspace.CurrentCamera
+    if not root or not camera or not humanoid or humanoid.Health <= 0 then return end
+
+    local startPos = root.Position + Vector3.new(0, 2.2, 0) + camera.CFrame.LookVector * 1.5
+    playThrowSound(startPos)
+
+    local pearl = Instance.new("Part")
+    pearl.Shape = Enum.PartType.Ball
+    pearl.Size = Vector3.new(1.2, 1.2, 1.2)
+    pearl.Position = startPos
+    pearl.Color = Color3.fromRGB(20, 120, 40)
+    pearl.Material = Enum.Material.Neon
+    pearl.CanCollide = false
+    pearl.CanQuery = false
+    pearl.CanTouch = false
+    pearl.Massless = false
+    pearl.Anchored = false
+    pearl.Parent = workspace
+
+    for _, face in ipairs({Enum.NormalId.Front, Enum.NormalId.Back, Enum.NormalId.Top, Enum.NormalId.Bottom, Enum.NormalId.Left, Enum.NormalId.Right}) do
+        local d = Instance.new("Decal")
+        d.Face = face
+        d.Texture = "rbxassetid://94829258992472"
+        d.Parent = pearl
+    end
+
+    local bf = Instance.new("BodyForce")
+    bf.Force = Vector3.new(0, workspace.Gravity * pearl:GetMass() * 0.58, 0)
+    bf.Parent = pearl
+
+    local trailAtt0 = Instance.new("Attachment", pearl)
+    local trailAtt1 = Instance.new("Attachment", pearl)
+    trailAtt1.Position = Vector3.new(0, 0.18, 0)
+    local trail = Instance.new("Trail", pearl)
+    trail.Attachment0 = trailAtt0
+    trail.Attachment1 = trailAtt1
+    trail.Color = ColorSequence.new(Color3.fromRGB(30, 160, 60), Color3.fromRGB(140, 255, 100))
+    trail.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 0.9)})
+    trail.Lifetime = 0.45
+    trail.WidthScale = NumberSequence.new(0.7)
+    trail.Enabled = true
+
+    local dir = camera.CFrame.LookVector
+    local mouse = LocalPlayer:GetMouse()
+    if mouse and mouse.Hit and (mouse.Hit.Position - camera.CFrame.Position).Magnitude > 5 then
+        local toMouse = (mouse.Hit.Position - startPos).Unit
+        if toMouse:Dot(camera.CFrame.LookVector) > 0.45 then
+            dir = toMouse
+        end
+    end
+
+    if dir.Magnitude < 0.01 then dir = camera.CFrame.LookVector end
+    local speed = 115
+    pearl.AssemblyLinearVelocity = dir * speed + Vector3.new(0, 14, 0)
+    pearl.AssemblyAngularVelocity = Vector3.new(8, 12, 0)
+
+    local lastPos = startPos
+    local hitConn
+    local rayConn
+    hitConn = pearl.Touched:Connect(function(hit)
+        if not pearl or not pearl.Parent then return end
+        if hit:IsDescendantOf(LocalPlayer.Character) then return end
+        if hit:IsDescendantOf(pearl) then return end
+        local pos = pearl.Position
+        doEnderTeleport(pos, pearl, hitConn, rayConn)
+    end)
+
+    rayConn = RunService.Heartbeat:Connect(function()
+        if not pearl or not pearl.Parent then
+            if rayConn then
+                pcall(function() rayConn:Disconnect() end)
+            end
+            return
+        end
+        local curPos = pearl.Position
+        local delta = curPos - lastPos
+        if delta.Magnitude > 0.15 then
+            local params = RaycastParams.new()
+            params.FilterDescendantsInstances = {LocalPlayer.Character, pearl}
+            params.FilterType = Enum.RaycastFilterType.Exclude
+            local res = workspace:Raycast(lastPos, delta, params)
+            if res then
+                doEnderTeleport(res.Position, pearl, hitConn, rayConn)
+                return
+            end
+        end
+        lastPos = curPos
+        if curPos.Y < workspace.FallenPartsDestroyHeight + 10 then
+            if hitConn then pcall(function() hitConn:Disconnect() end) end
+            if rayConn then pcall(function() rayConn:Disconnect() end) end
+            pcall(function() pearl:Destroy() end)
+        end
+    end)
+
+    task.delay(7, function()
+        if pearl and pearl.Parent then
+            if hitConn then pcall(function() hitConn:Disconnect() end) end
+            if rayConn then pcall(function() rayConn:Disconnect() end) end
+            pcall(function() pearl:Destroy() end)
+        end
+    end)
+end
+
+local function createEnderPearlTool()
+    local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
+    if not backpack then return end
+
+    for _, old in ipairs(backpack:GetChildren()) do
+        if old:IsA("Tool") and old.Name == "Эндерперл" then
+            old:Destroy()
+        end
+    end
+    local character = LocalPlayer.Character
+    if character then
+        for _, old in ipairs(character:GetChildren()) do
+            if old:IsA("Tool") and old.Name == "Эндерперл" then
+                old:Destroy()
+            end
+        end
+    end
+
+    local tool = Instance.new("Tool")
+    tool.Name = "Эндерперл"
+    tool.TextureId = "rbxassetid://94829258992472"
+    tool.RequiresHandle = true
+    tool.CanBeDropped = false
+
+    local handle = Instance.new("Part")
+    handle.Name = "Handle"
+    handle.Shape = Enum.PartType.Block
+    handle.Size = Vector3.new(1.1, 1.1, 0.08)
+    handle.Color = Color3.fromRGB(15, 15, 18)
+    handle.Material = Enum.Material.SmoothPlastic
+    handle.CanCollide = false
+    handle.Massless = true
+    handle.Parent = tool
+
+    local d1 = Instance.new("Decal")
+    d1.Name = "FrontTexture"
+    d1.Face = Enum.NormalId.Front
+    d1.Texture = "rbxassetid://94829258992472"
+    d1.Parent = handle
+
+    local d2 = Instance.new("Decal")
+    d2.Name = "BackTexture"
+    d2.Face = Enum.NormalId.Back
+    d2.Texture = "rbxassetid://94829258992472"
+    d2.Parent = handle
+
+    tool.Activated:Connect(function()
+        throwEnderPearl(tool)
+    end)
+
+    tool.Parent = backpack
+end
+
+createEnderPearlTool()
+
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(0.5)
+    createEnderPearlTool()
+end)
+
+UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.KeyCode == Enum.KeyCode.Q and not UserInputService:GetFocusedTextBox() then
+        throwEnderPearl(nil)
+    end
+end)
