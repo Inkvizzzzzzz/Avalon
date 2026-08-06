@@ -193,6 +193,52 @@ local function throwEnderPearl(tool)
     end)
 end
 
+local function attachEnderPearlModel(handle)
+    handle.Transparency = 1
+    local ok, objs = pcall(function()
+        return game:GetObjects("rbxassetid://82723206005569")
+    end)
+    if ok and objs and #objs > 0 then
+        local model = objs[1]
+        model.Parent = handle
+        if model:IsA("Model") then
+            for _, part in ipairs(model:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.Anchored = false
+                    part.CanCollide = false
+                    part.Massless = true
+                    part.Transparency = 0
+                    local w = Instance.new("WeldConstraint")
+                    w.Part0 = handle
+                    w.Part1 = part
+                    w.Parent = handle
+                end
+            end
+            model:PivotTo(handle.CFrame)
+        elseif model:IsA("BasePart") then
+            model.Anchored = false
+            model.CanCollide = false
+            model.Massless = true
+            model.Transparency = 0
+            model.CFrame = handle.CFrame
+            local w = Instance.new("WeldConstraint")
+            w.Part0 = handle
+            w.Part1 = model
+            w.Parent = handle
+        end
+        return true
+    end
+
+    handle.Transparency = 0
+    local mesh = Instance.new("SpecialMesh")
+    mesh.MeshType = Enum.MeshType.FileMesh
+    mesh.MeshId = "rbxassetid://82723206005569"
+    mesh.TextureId = "rbxassetid://94829258992472"
+    mesh.Scale = Vector3.new(1.1, 1.1, 1.1)
+    mesh.Parent = handle
+    return false
+end
+
 local function createEnderPearlTool()
     local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
     if not backpack then return end
@@ -216,28 +262,18 @@ local function createEnderPearlTool()
     tool.TextureId = "rbxassetid://94829258992472"
     tool.RequiresHandle = true
     tool.CanBeDropped = false
+    tool.Grip = CFrame.new(0, -0.35, 0.15)
 
     local handle = Instance.new("Part")
     handle.Name = "Handle"
-    handle.Shape = Enum.PartType.Block
-    handle.Size = Vector3.new(1.1, 1.1, 0.08)
-    handle.Color = Color3.fromRGB(15, 15, 18)
-    handle.Material = Enum.Material.SmoothPlastic
+    handle.Shape = Enum.PartType.Ball
+    handle.Size = Vector3.new(0.9, 0.9, 0.9)
+    handle.Transparency = 1
     handle.CanCollide = false
     handle.Massless = true
     handle.Parent = tool
 
-    local d1 = Instance.new("Decal")
-    d1.Name = "FrontTexture"
-    d1.Face = Enum.NormalId.Front
-    d1.Texture = "rbxassetid://94829258992472"
-    d1.Parent = handle
-
-    local d2 = Instance.new("Decal")
-    d2.Name = "BackTexture"
-    d2.Face = Enum.NormalId.Back
-    d2.Texture = "rbxassetid://94829258992472"
-    d2.Parent = handle
+    attachEnderPearlModel(handle)
 
     tool.Activated:Connect(function()
         throwEnderPearl(tool)
