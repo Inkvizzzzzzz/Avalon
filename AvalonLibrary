@@ -356,8 +356,7 @@ local function SwitchTab(name)
 	if Win.activeTab then
 		Win.tabs[Win.activeTab].page.Visible = false
 		Win.tabs[Win.activeTab].button.BackgroundColor3 = Color3.fromRGB(31, 31, 36)
-		local ic = Win.tabIconMap[Win.tabs[Win.activeTab].button]
-		if ic then ic.ImageColor3 = Library.Colors.muted end
+		Win.tabs[Win.activeTab].button.TextColor3 = Library.Colors.muted
 	end
 	Win.activeTab = name
 	local tab = Win.tabs[name]
@@ -365,8 +364,7 @@ local function SwitchTab(name)
 	tab.page.Position = UDim2.fromOffset(6, 16)
 	Animate(tab.page, { Position = UDim2.fromOffset(6, 8) }, 0.2)
 	tab.button.BackgroundColor3 = Library.Colors.controlHover
-	local ic2 = Win.tabIconMap[tab.button]
-	if ic2 then ic2.ImageColor3 = Library.Colors.text end
+	tab.button.TextColor3 = Library.Colors.text
 	Win.RightPanel.CanvasPosition = Vector2.new(0, 0)
 	task.defer(function()
 		if Win.tabs[name] and Win.tabs[name].page and Win.tabs[name].page.Visible then
@@ -375,37 +373,21 @@ local function SwitchTab(name)
 	end)
 end
 
-local DEFAULT_TAB_ICONS = {
-	["Игрок"] = "rbxassetid://7992557358",
-	["Мир"] = "rbxassetid://92875681906793",
-	["Визуалы"] = "rbxassetid://6523858394",
-	["Настройки"] = "rbxassetid://9405931578",
-	["Информация"] = "rbxassetid://91727514118912",
-}
-
-local function MakeButton(parent, text, customIcon)
-	local img = customIcon or DEFAULT_TAB_ICONS[text] or ""
+local function MakeTabButton(parent, text)
 	local button = Create("TextButton", {
-		Size = UDim2.fromOffset(48, 48),
+		Size = UDim2.new(1, 0, 0, 30),
 		BackgroundColor3 = Color3.fromRGB(31, 31, 36),
 		BorderSizePixel = 0,
-		Text = "",
+		Text = text,
+		TextColor3 = Library.Colors.muted,
+		TextSize = 12,
+		Font = Enum.Font.GothamBold,
+		TextTruncate = Enum.TextTruncate.AtEnd,
 		AutoButtonColor = false,
 		Parent = parent,
 	})
 	Create("UICorner", { CornerRadius = UDim.new(0, 8), Parent = button })
 	Create("UIStroke", { Color = Library.Colors.cardStroke, Thickness = 1, Parent = button })
-	local icon = Create("ImageLabel", {
-		Size = UDim2.fromOffset(28, 28),
-		Position = UDim2.new(0.5, 0, 0.5, 0),
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		BackgroundTransparency = 1,
-		Image = img,
-		ScaleType = Enum.ScaleType.Fit,
-		ImageColor3 = Library.Colors.muted,
-		Parent = button,
-	})
-	Win.tabIconMap[button] = icon
 	return button
 end
 
@@ -1201,7 +1183,6 @@ end
 local function BuildWindow(options)
 	options = options or {}
 	local windowTitle = tostring(options.Title or "Avalon")
-	local windowSubtitle = tostring(options.Subtitle or "")
 	local windowIcon = options.Icon or "rbxassetid://9213540777"
 	local windowSize = options.Size or UDim2.fromScale(0.84, 0.58)
 	local minSize = options.MinSize or Vector2.new(290, 220)
@@ -1212,7 +1193,6 @@ local function BuildWindow(options)
 	
 	Win.themeObjects = { accent = {} }
 	Win.themeRefreshers = {}
-	Win.tabIconMap = {}
 	Win.tabs = {}
 	Win.activeTab = nil
 	Win.featureToggleSetters = {}
@@ -1433,9 +1413,6 @@ local function BuildWindow(options)
 		Parent = Win.Header,
 	})
 	local function titleRichText()
-		if windowSubtitle and windowSubtitle ~= "" then
-			return "<font size='18'>" .. EscapeXml(windowTitle) .. "</font> <font size='12' color='rgb(175,175,185)'>" .. EscapeXml(windowSubtitle) .. "</font>"
-		end
 		return "<font size='18'>" .. EscapeXml(windowTitle) .. "</font>"
 	end
 	Win.TitleLabel = Create("TextLabel", {
@@ -1518,7 +1495,7 @@ local function BuildWindow(options)
 
 	
 	Win.LeftPanel = Create("ScrollingFrame", {
-		Size = UDim2.new(0, 72, 1, -44),
+		Size = UDim2.new(0, 110, 1, -44),
 		Position = UDim2.fromOffset(0, 44),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
@@ -1542,8 +1519,8 @@ local function BuildWindow(options)
 		Parent = Win.LeftPanel,
 	})
 	Win.RightPanel = Create("ScrollingFrame", {
-		Size = UDim2.new(1, -72, 1, -44),
-		Position = UDim2.fromOffset(72, 44),
+		Size = UDim2.new(1, -110, 1, -44),
+		Position = UDim2.fromOffset(110, 44),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		ScrollBarThickness = 3,
@@ -1589,7 +1566,8 @@ local function BuildWindow(options)
 	end)
 
 	
-	local function AddTab(name, tabIcon)
+	local function AddTab(name)
+		local isInfoTab = (name == "Информация")
 		local page = Create("Frame", {
 			Size = UDim2.new(1, -12, 0, 1),
 			Position = UDim2.fromOffset(6, 8),
@@ -1639,7 +1617,7 @@ local function BuildWindow(options)
 			return card
 		end
 
-		local tabButton = MakeButton(Win.LeftPanel, name, tabIcon)
+		local tabButton = MakeTabButton(Win.LeftPanel, name)
 		local tab = {
 			Name = name,
 			page = page,
@@ -1795,13 +1773,17 @@ local function BuildWindow(options)
 			SwitchTab(name)
 			task.defer(updatePageHeight)
 		end)
+		if not isInfoTab and (Win.activeTab == nil or Win.activeTab == "Информация") then
+			SwitchTab(name)
+		end
 		return tab
 	end
 
 	
 	local windowApi = {}
-	function windowApi:AddTab(name, tabIcon)
-		return AddTab(name, tabIcon)
+	function windowApi:AddTab(name)
+		if Win.tabs[name] then return Win.tabs[name] end
+		return AddTab(name)
 	end
 	function windowApi:SetTheme(name)
 		ApplyTheme(name)
@@ -1816,9 +1798,8 @@ local function BuildWindow(options)
 	function windowApi:SetKeybind(keyCode)
 		Win.openKeybind = keyCode
 	end
-	function windowApi:SetTitle(title, subtitle)
+	function windowApi:SetTitle(title)
 		windowTitle = tostring(title or windowTitle)
-		if subtitle ~= nil then windowSubtitle = tostring(subtitle) end
 		Win.TitleLabel.Text = titleRichText()
 	end
 	function windowApi:GetConfig()
@@ -1937,7 +1918,30 @@ local function BuildWindow(options)
 	end)
 
 	
-	SwitchTab("Игрок")
+	local infoTab = AddTab("Информация")
+	local infoSection = infoTab:AddSection("О скрипте")
+	infoSection:AddText(windowTitle)
+	if options.Dev then
+		infoSection:AddText("Разработчик: " .. tostring(options.Dev))
+	end
+	for _, link in ipairs(options.Links or {}) do
+		infoSection:AddButton({
+			Text = link.Text or "Ссылка",
+			ButtonText = "Открыть",
+			Callback = function()
+				local url = tostring(link.URL or "")
+				pcall(function() game:GetService("Clipboard"):SetText(url) end)
+				pcall(function()
+					if setclipboard then
+						setclipboard(url)
+					elseif toclipboard then
+						toclipboard(url)
+					end
+				end)
+			end,
+		})
+	end
+	SwitchTab("Информация")
 	ApplyTheme(options.Theme or Library.Config.theme or "Зеленая")
 	pcall(function()
 		Win.menuIsOpen = true
