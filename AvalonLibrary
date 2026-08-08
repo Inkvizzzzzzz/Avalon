@@ -1567,7 +1567,6 @@ local function BuildWindow(options)
 
 	
 	local function AddTab(name)
-		local isInfoTab = (name == "Информация")
 		local page = Create("Frame", {
 			Size = UDim2.new(1, -12, 0, 1),
 			Position = UDim2.fromOffset(6, 8),
@@ -1773,7 +1772,7 @@ local function BuildWindow(options)
 			SwitchTab(name)
 			task.defer(updatePageHeight)
 		end)
-		if not isInfoTab and (Win.activeTab == nil or Win.activeTab == "Информация") then
+		if Win.activeTab == nil then
 			SwitchTab(name)
 		end
 		return tab
@@ -1918,30 +1917,6 @@ local function BuildWindow(options)
 	end)
 
 	
-	local infoTab = AddTab("Информация")
-	local infoSection = infoTab:AddSection("О скрипте")
-	infoSection:AddText(windowTitle)
-	if options.Dev then
-		infoSection:AddText("Разработчик: " .. tostring(options.Dev))
-	end
-	for _, link in ipairs(options.Links or {}) do
-		infoSection:AddButton({
-			Text = link.Text or "Ссылка",
-			ButtonText = "Открыть",
-			Callback = function()
-				local url = tostring(link.URL or "")
-				pcall(function() game:GetService("Clipboard"):SetText(url) end)
-				pcall(function()
-					if setclipboard then
-						setclipboard(url)
-					elseif toclipboard then
-						toclipboard(url)
-					end
-				end)
-			end,
-		})
-	end
-	SwitchTab("Информация")
 	ApplyTheme(options.Theme or Library.Config.theme or "Зеленая")
 	pcall(function()
 		Win.menuIsOpen = true
