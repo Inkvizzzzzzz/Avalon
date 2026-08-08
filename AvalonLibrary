@@ -1,0 +1,2005 @@
+local Library = {}
+
+Library.Name = "Avalon Library"
+Library.Version = "1.0.0"
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
+local GuiService = game:GetService("GuiService")
+local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
+local Debris = nil
+pcall(function() Debris = game:GetService("Debris") end)
+
+Library.Services = {
+	Players = Players,
+	UserInputService = UserInputService,
+	RunService = RunService,
+	Lighting = Lighting,
+	GuiService = GuiService,
+	TweenService = TweenService,
+	HttpService = HttpService,
+	Debris = Debris,
+}
+Library.Players = Players
+Library.RunService = RunService
+Library.UserInputService = UserInputService
+Library.Lighting = Lighting
+Library.TweenService = TweenService
+Library.HttpService = HttpService
+
+if not table.clear then
+	function table.clear(t)
+		for k in pairs(t) do t[k] = nil end
+	end
+end
+
+Library.Themes = {
+	["Синяя"] = { Color3.fromRGB(50, 118, 255), Color3.fromRGB(56, 228, 255) },
+	["Красная"] = { Color3.fromRGB(245, 66, 70), Color3.fromRGB(255, 150, 54) },
+	["Зеленая"] = { Color3.fromRGB(41, 190, 105), Color3.fromRGB(166, 255, 58) },
+	["Черная"] = { Color3.fromRGB(54, 50, 66), Color3.fromRGB(145, 83, 205) },
+	["Белая"] = { Color3.fromRGB(205, 215, 235), Color3.fromRGB(255, 255, 255) },
+}
+Library.ThemeOrder = { "Синяя", "Красная", "Зеленая", "Черная", "Белая" }
+
+function Library:AddTheme(name, accent, secondary)
+	Library.Themes[name] = { accent, secondary }
+	if not table.find(Library.ThemeOrder, name) then
+		table.insert(Library.ThemeOrder, name)
+	end
+end
+
+Library.Colors = {
+	background = Color3.fromRGB(15, 15, 18),
+	card = Color3.fromRGB(24, 24, 28),
+	cardStroke = Color3.fromRGB(61, 61, 68),
+	divider = Color3.fromRGB(55, 55, 62),
+	text = Color3.fromRGB(245, 245, 247),
+	muted = Color3.fromRGB(165, 165, 174),
+	control = Color3.fromRGB(54, 54, 61),
+	controlHover = Color3.fromRGB(67, 67, 75),
+	accent = Color3.fromRGB(51, 205, 120),
+	secondary = Color3.fromRGB(166, 255, 58),
+}
+
+local SharedEnv = (getgenv and getgenv()) or _G
+if SharedEnv.AvalonLibraryCleanup then
+	pcall(SharedEnv.AvalonLibraryCleanup)
+end
+
+local Win = {} 
+local Cleanup = { alive = true, connections = {} }
+local ActiveColor = Library.Colors.accent
+
+local function Connect(signal, callback)
+	local connection = signal:Connect(callback)
+	table.insert(Cleanup.connections, connection)
+	return connection
+end
+
+Library.CONFIG_VERSION = 2
+Library.ConfigName = "AvalonLib" 
+
+local DEFAULT_MENU = { xScale = 0.5, xOffset = 0, yScale = 0.5, yOffset = 0 }
+
+local function defaultConfig()
+	return {
+		version = Library.CONFIG_VERSION,
+		theme = "Зеленая",
+		menu = { xScale = 0.5, xOffset = 0, yScale = 0.5, yOffset = 0 },
+		keyboardBinds = {},
+		features = {},
+	}
+end
+
+Library.Config = defaultConfig()
+
+local function isFiniteNumber(value)
+	return type(value) == "number" and value == value and value ~= math.huge and value ~= -math.huge
+end
+
+local function copyTable(source)
+	local result = {}
+	for key, value in pairs(source) do result[key] = value end
+	return result
+end
+
+local VALID_THEMES = {}
+
+local function LoadConfigFile()
+	Library.Config = defaultConfig()
+	table.clear(VALID_THEMES)
+	for name in pairs(Library.Themes) do VALID_THEMES[name] = true end
+	if not (writefile and readfile and isfile) then return end
+	pcall(function()
+		local path = Library.ConfigName .. ".json"
+		if isfile(path) then
+			local decoded = HttpService:JSONDecode(readfile(path))
+			if type(decoded) == "table" and decoded.version == Library.CONFIG_VERSION then
+				for key, value in pairs(decoded) do Library.Config[key] = value end
+			else
+				Library.Config._reset = true
+			end
+		end
+	end)
+
+	local configNeedsSave = Library.Config._reset == true
+	if type(Library.Config.theme) ~= "string" or not VALID_THEMES[Library.Config.theme] then
+		Library.Config.theme = "Зеленая"
+		configNeedsSave = true
+	end
+	if type(Library.Config.features) ~= "table" then
+		Library.Config.features = {}
+		configNeedsSave = true
+	end
+	if type(Library.Config.menu) ~= "table"
+		or not isFiniteNumber(Library.Config.menu.xScale) or not isFiniteNumber(Library.Config.menu.xOffset)
+		or not isFiniteNumber(Library.Config.menu.yScale) or not isFiniteNumber(Library.Config.menu.yOffset)
+		or math.abs(Library.Config.menu.xOffset) > 2500 or math.abs(Library.Config.menu.yOffset) > 2500
+		or Library.Config.menu.xScale < -0.2 or Library.Config.menu.xScale > 1.2
+		or Library.Config.menu.yScale < -0.2 or Library.Config.menu.yScale > 1.2
+		or (Library.Config.menu.xScale == 0 and Library.Config.menu.yScale == 0 and Library.Config.menu.xOffset == 0 and Library.Config.menu.yOffset == 0) then
+		Library.Config.menu = copyTable(DEFAULT_MENU)
+		configNeedsSave = true
+	end
+	if type(Library.Config.keyboardBinds) ~= "table" then
+		Library.Config.keyboardBinds = {}
+		configNeedsSave = true
+	else
+		local sanitizedBinds = {}
+		local bindsChanged = false
+		for featureName, keyName in pairs(Library.Config.keyboardBinds) do
+			local valid = type(featureName) == "string" and type(keyName) == "string"
+			if valid then
+				local ok, keyCode = pcall(function() return Enum.KeyCode[keyName] end)
+				valid = ok and keyCode ~= nil
+			end
+			if valid then
+				sanitizedBinds[featureName] = keyName
+			else
+				bindsChanged = true
+			end
+		end
+		if bindsChanged then
+			Library.Config.keyboardBinds = sanitizedBinds
+			configNeedsSave = true
+		end
+	end
+	Library.Config._reset = nil
+	if configNeedsSave then Library:SaveConfig() end
+end
+
+local saveScheduled = false
+
+function Library:SaveConfig()
+	if writefile then
+		pcall(function()
+			Library.Config.version = Library.CONFIG_VERSION
+			writefile(Library.ConfigName .. ".json", HttpService:JSONEncode(Library.Config))
+		end)
+	end
+end
+
+local function ScheduleSave()
+	if saveScheduled then return end
+	saveScheduled = true
+	task.delay(0.6, function()
+		if not Cleanup.alive then return end
+		saveScheduled = false
+		Library:SaveConfig()
+	end)
+end
+
+function Library:SetFeature(key, value)
+	if key == nil then return end
+	Library.Config.features[key] = value
+	ScheduleSave()
+end
+
+function Library:GetFeature(key)
+	if key == nil then return nil end
+	return Library.Config.features[key]
+end
+
+local function SaveFeature(key, value)
+	Library:SetFeature(key, value)
+end
+
+local function LoadFeature(key)
+	return Library:GetFeature(key)
+end
+
+local function Create(className, properties)
+	local object = Instance.new(className)
+	for property, value in pairs(properties or {}) do
+		object[property] = value
+	end
+	return object
+end
+
+local function Animate(object, properties, duration)
+	local tween = TweenService:Create(object, TweenInfo.new(duration or 0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), properties)
+	tween:Play()
+	return tween
+end
+
+local function AnimateMenu(object, properties, duration)
+	local tween = TweenService:Create(object, TweenInfo.new(duration or 0.82, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), properties)
+	tween:Play()
+	return tween
+end
+
+local function GetSafeGuiParent()
+	local ok, res = pcall(function()
+		if gethui then
+			local hui = gethui()
+			if hui and (hui:IsA("ScreenGui") or hui:IsA("Folder") or hui:IsA("CoreGui") or hui.Parent) then
+				return hui
+			end
+		end
+		if cloneref then
+			local cg = cloneref(game:GetService("CoreGui"))
+			if cg then return cg end
+		end
+		return game:GetService("CoreGui")
+	end)
+	if ok and res then return res end
+
+	local lp = Players.LocalPlayer
+	if lp then
+		local pg = lp:FindFirstChildOfClass("PlayerGui") or lp:FindFirstChild("PlayerGui")
+		if pg then return pg end
+		return lp:WaitForChild("PlayerGui", 5)
+	end
+	return nil
+end
+
+local OLD_GUI_NAMES = { "AvalonLibHub", "AvalonLibLauncher", "AvalonHub", "AvalonLauncher", "AvalonBackdrop" }
+
+local function CleanupOldGuis(parent)
+	if not parent then return end
+	pcall(function()
+		for _, g in ipairs(parent:GetChildren()) do
+			if g:IsA("ScreenGui") then
+				for _, name in ipairs(OLD_GUI_NAMES) do
+					if g.Name == name then
+						g:Destroy()
+						break
+					end
+				end
+			end
+		end
+	end)
+end
+
+local function AddThemeRefresher(callback)
+	table.insert(Win.themeRefreshers, callback)
+end
+
+local function ApplyTheme(name)
+	if not Win.ScreenGui or not Win.ScreenGui.Parent then return end
+	if not Library.Themes[name] then name = "Зеленая" end
+	Library.Config.theme = name
+	Library:SaveConfig()
+	local palette = Library.Themes[name]
+	local accent, secondary = palette[1], palette[2]
+	Library.Colors.accent = accent
+	Library.Colors.secondary = secondary
+	ActiveColor = accent
+	local sequence = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, secondary),
+		ColorSequenceKeypoint.new(0.34, accent),
+		ColorSequenceKeypoint.new(0.62, secondary),
+		ColorSequenceKeypoint.new(1, accent),
+	})
+	Win.BorderGradient.Color = sequence
+	Win.LauncherGradient.Color = sequence
+	Win.Shimmer.BackgroundColor3 = accent
+	Win.ShimmerGradient.Color = ColorSequence.new(secondary, accent)
+	for _, object in ipairs(Win.themeObjects.accent) do
+		if object and object.Parent then object.BackgroundColor3 = accent end
+	end
+	for _, refresh in ipairs(Win.themeRefreshers) do
+		refresh()
+	end
+end
+
+local function ClosePopup()
+	if Win.activePopup then
+		Win.activePopup:Destroy()
+		Win.activePopup = nil
+	end
+	Win.activePopupButton = nil
+end
+
+local function ToggleMainMenu()
+	Win.menuTransitionId = Win.menuTransitionId + 1
+	local transitionId = Win.menuTransitionId
+	local viewport = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(800, 600)
+	if Win.menuTween then pcall(function() Win.menuTween:Cancel() end); Win.menuTween = nil end
+	if Win.menuIsOpen then
+		Win.menuIsOpen = false
+		local hidden = UDim2.new(Win.menuRestPosition.X.Scale, Win.menuRestPosition.X.Offset, Win.menuRestPosition.Y.Scale, Win.menuRestPosition.Y.Offset + viewport.Y + Win.Main.AbsoluteSize.Y)
+		Win.menuTween = AnimateMenu(Win.Main, { Position = hidden }, 0.9)
+		AnimateMenu(Win.MenuBlur, { Size = 0 }, 0.4)
+		task.delay(0.42, function()
+			if not Cleanup.alive then return end
+			if not Win.menuIsOpen then Win.MenuBlur.Enabled = false end
+		end)
+		task.delay(0.91, function()
+			if not Cleanup.alive then return end
+			if transitionId == Win.menuTransitionId then
+				Win.Main.Visible = false
+			end
+			if not Win.menuIsOpen then Win.MenuBlur.Enabled = false end
+		end)
+		if Win.activePopup then ClosePopup() end
+	else
+		Win.menuIsOpen = true
+		local target = Win.menuRestPosition
+		local hidden = UDim2.new(target.X.Scale, target.X.Offset, target.Y.Scale, target.Y.Offset + viewport.Y + Win.Main.AbsoluteSize.Y)
+		Win.Main.Position = hidden
+		Win.Main.Visible = true
+		Win.MenuBlur.Enabled = true
+		Win.MenuBlur.Size = 0
+		AnimateMenu(Win.MenuBlur, { Size = 28 }, 0.9)
+		Win.menuTween = AnimateMenu(Win.Main, { Position = target }, 0.9)
+	end
+end
+
+local function SwitchTab(name)
+	if Win.activeTab == name or not Win.tabs[name] then return end
+	ClosePopup()
+	if Win.activeTab then
+		Win.tabs[Win.activeTab].page.Visible = false
+		Win.tabs[Win.activeTab].button.BackgroundColor3 = Color3.fromRGB(31, 31, 36)
+		local ic = Win.tabIconMap[Win.tabs[Win.activeTab].button]
+		if ic then ic.ImageColor3 = Library.Colors.muted end
+	end
+	Win.activeTab = name
+	local tab = Win.tabs[name]
+	tab.page.Visible = true
+	tab.page.Position = UDim2.fromOffset(6, 16)
+	Animate(tab.page, { Position = UDim2.fromOffset(6, 8) }, 0.2)
+	tab.button.BackgroundColor3 = Library.Colors.controlHover
+	local ic2 = Win.tabIconMap[tab.button]
+	if ic2 then ic2.ImageColor3 = Library.Colors.text end
+	Win.RightPanel.CanvasPosition = Vector2.new(0, 0)
+	task.defer(function()
+		if Win.tabs[name] and Win.tabs[name].page and Win.tabs[name].page.Visible then
+			Win.RightPanel.CanvasSize = UDim2.fromOffset(0, 24 + math.max(1, Win.tabs[name].page.AbsoluteSize.Y))
+		end
+	end)
+end
+
+local DEFAULT_TAB_ICONS = {
+	["Игрок"] = "rbxassetid://7992557358",
+	["Мир"] = "rbxassetid://92875681906793",
+	["Визуалы"] = "rbxassetid://6523858394",
+	["Настройки"] = "rbxassetid://9405931578",
+	["Информация"] = "rbxassetid://91727514118912",
+}
+
+local function MakeButton(parent, text, customIcon)
+	local img = customIcon or DEFAULT_TAB_ICONS[text] or ""
+	local button = Create("TextButton", {
+		Size = UDim2.fromOffset(48, 48),
+		BackgroundColor3 = Color3.fromRGB(31, 31, 36),
+		BorderSizePixel = 0,
+		Text = "",
+		AutoButtonColor = false,
+		Parent = parent,
+	})
+	Create("UICorner", { CornerRadius = UDim.new(0, 8), Parent = button })
+	Create("UIStroke", { Color = Library.Colors.cardStroke, Thickness = 1, Parent = button })
+	local icon = Create("ImageLabel", {
+		Size = UDim2.fromOffset(28, 28),
+		Position = UDim2.new(0.5, 0, 0.5, 0),
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		BackgroundTransparency = 1,
+		Image = img,
+		ScaleType = Enum.ScaleType.Fit,
+		ImageColor3 = Library.Colors.muted,
+		Parent = button,
+	})
+	Win.tabIconMap[button] = icon
+	return button
+end
+
+local function MakeToggle(parent, definition)
+	local toggle = Create("TextButton", {
+		Size = UDim2.fromOffset(42, 20),
+		Position = UDim2.new(0, 0, 0.5, -10),
+		BackgroundColor3 = Library.Colors.control,
+		BorderSizePixel = 0,
+		Text = "",
+		AutoButtonColor = false,
+		Parent = parent,
+	})
+	Create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = toggle })
+	local thumb = Create("Frame", {
+		Size = UDim2.fromOffset(16, 16),
+		Position = UDim2.fromOffset(2, 2),
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		BorderSizePixel = 0,
+		Parent = toggle,
+	})
+	Create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = thumb })
+
+	local value = definition.default == true
+
+	local function setValue(newValue, callCallback)
+		value = newValue
+		if definition.bindName then
+			Win.featureStates[definition.bindName] = value
+			Win.refreshBindButtons()
+		end
+		Animate(toggle, { BackgroundColor3 = value and ActiveColor or Library.Colors.control })
+		Animate(thumb, { Position = value and UDim2.fromOffset(24, 2) or UDim2.fromOffset(2, 2) })
+		if callCallback then
+			SaveFeature(definition.saveKey, value)
+			if definition.onChange then definition.onChange(value) end
+		end
+	end
+
+	setValue(value, false)
+	do
+		local saved = LoadFeature(definition.saveKey)
+		if type(saved) == "boolean" and saved ~= value then
+			task.defer(function()
+				pcall(function() setValue(saved, true) end)
+			end)
+		end
+	end
+	AddThemeRefresher(function()
+		if toggle.Parent then toggle.BackgroundColor3 = value and ActiveColor or Library.Colors.control end
+	end)
+	if definition.bindName then
+		Win.featureToggleSetters[definition.bindName] = function(newValue)
+			setValue(newValue, true)
+		end
+	end
+	Connect(toggle.Activated, function() setValue(not value, true) end)
+
+	return {
+		SetValue = function(self, newValue, callCallback)
+			setValue(newValue, callCallback ~= false)
+		end,
+		GetValue = function(self) return value end,
+	}
+end
+
+local activeSliderToken = nil
+
+local function MakeSlider(parent, definition)
+	local sliderToken = {}
+	local holder = Create("Frame", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Parent = parent })
+	local valueLabel = Create("TextBox", {
+		Size = UDim2.fromOffset(34, 22),
+		Position = UDim2.new(1, -34, 0.5, -11),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ClearTextOnFocus = false,
+		TextColor3 = Library.Colors.text,
+		TextSize = 11,
+		Font = Enum.Font.GothamMedium,
+		TextXAlignment = Enum.TextXAlignment.Right,
+		Parent = holder,
+	})
+	local knobDiameter = 18
+	local track = Create("TextButton", {
+		Size = UDim2.new(1, -38, 0, 24),
+		Position = UDim2.new(0, 0, 0.5, -12),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		Text = "",
+		AutoButtonColor = false,
+		Parent = holder,
+	})
+	local rail = Create("Frame", {
+		Size = UDim2.new(1, 0, 0, 6),
+		Position = UDim2.new(0, 0, 0.5, -3),
+		BackgroundColor3 = Library.Colors.control,
+		BorderSizePixel = 0,
+		Parent = track,
+	})
+	Create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = rail })
+	local fill = Create("Frame", {
+		Size = UDim2.new(0, 0, 1, 0),
+		BackgroundColor3 = Library.Colors.accent,
+		BorderSizePixel = 0,
+		Parent = rail,
+	})
+	table.insert(Win.themeObjects.accent, fill)
+	Create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = fill })
+	local knob = Create("Frame", {
+		Size = UDim2.fromOffset(knobDiameter, knobDiameter),
+		BackgroundColor3 = Color3.fromRGB(250, 250, 252),
+		BorderSizePixel = 0,
+		ZIndex = 3,
+		Parent = track,
+	})
+	Create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = knob })
+	Create("UIStroke", { Color = Color3.fromRGB(180, 180, 188), Transparency = 0.35, Thickness = 1, Parent = knob })
+
+	local value = definition.default
+	if value == nil then value = definition.min or 0 end
+	local pointer, moving = nil, false
+
+	local function update(newValue, callCallback)
+		value = math.clamp(newValue, definition.min, definition.max)
+		local percent = (value - definition.min) / (definition.max - definition.min)
+		local width = math.max(track.AbsoluteSize.X, knobDiameter)
+		local travel = math.max(0, width - knobDiameter)
+		local knobX = math.round(travel * percent)
+		fill.Size = UDim2.fromOffset(math.round(knobX + knobDiameter / 2), 6)
+		knob.Position = UDim2.fromOffset(knobX, math.round((24 - knobDiameter) / 2))
+		valueLabel.Text = tostring(math.round(value))
+		if callCallback then
+			SaveFeature(definition.saveKey, value)
+			if definition.onChange then definition.onChange(value) end
+		end
+	end
+
+	local function setFromInput(input)
+		local width = math.max(track.AbsoluteSize.X, knobDiameter)
+		local travel = math.max(1, width - knobDiameter)
+		local percent = math.clamp((input.Position.X - track.AbsolutePosition.X - knobDiameter / 2) / travel, 0, 1)
+		update(definition.min + percent * (definition.max - definition.min), true)
+	end
+
+	Connect(track:GetPropertyChangedSignal("AbsoluteSize"), function()
+		update(value, false)
+	end)
+	update(value, false)
+	do
+		local saved = LoadFeature(definition.saveKey)
+		if type(saved) == "number" then
+			task.defer(function()
+				pcall(function() update(saved, true) end)
+			end)
+		end
+	end
+	Connect(valueLabel.FocusLost, function()
+		local cleanText = valueLabel.Text:gsub(",", ".")
+		local typedValue = tonumber(cleanText)
+		if typedValue then
+			update(typedValue, true)
+		else
+			update(value, false)
+		end
+	end)
+	Connect(track.InputBegan, function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			activeSliderToken = sliderToken
+			moving, pointer = true, input
+			setFromInput(input)
+		end
+	end)
+	Connect(UserInputService.InputChanged, function(input)
+		local isMouseMove = pointer and pointer.UserInputType == Enum.UserInputType.MouseButton1
+			and input.UserInputType == Enum.UserInputType.MouseMovement
+		if moving and activeSliderToken == sliderToken and (input == pointer or isMouseMove) then
+			setFromInput(input)
+		end
+	end)
+	Connect(UserInputService.InputEnded, function(input)
+		if input == pointer then
+			moving, pointer = false, nil
+			if activeSliderToken == sliderToken then activeSliderToken = nil end
+		end
+	end)
+
+	return {
+		SetValue = function(self, newValue, callCallback)
+			update(newValue, callCallback ~= false)
+		end,
+		GetValue = function(self) return value end,
+	}
+end
+
+local function MakeDropdown(parent, definition)
+	local choices = definition.options or {}
+	local selected = math.clamp(definition.defaultIndex or 1, 1, math.max(#choices, 1))
+	local selectedSet = {}
+	if definition.multi then
+		for _, option in ipairs(definition.defaultSelected or {}) do selectedSet[option] = true end
+	end
+	local function countSelected()
+		local count = 0
+		for _, isOn in pairs(selectedSet) do
+			if isOn == true then count = count + 1 end
+		end
+		return count
+	end
+	local function multiButtonText()
+		local count = countSelected()
+		return count > 0 and (definition.placeholder or "Выбрать") .. " (" .. count .. ")" or (definition.placeholder or "Выбрать")
+	end
+	local buttonText = definition.multi and multiButtonText() or (choices[selected] or "—")
+	local button = Create("TextButton", {
+		Size = UDim2.new(1, 0, 0, 26),
+		Position = UDim2.new(0, 0, 0.5, -13),
+		BackgroundColor3 = Library.Colors.control,
+		BorderSizePixel = 0,
+		Text = buttonText,
+		TextColor3 = Library.Colors.text,
+		TextSize = 12,
+		Font = Enum.Font.GothamBold,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		AutoButtonColor = false,
+		Parent = parent,
+	})
+	Create("UICorner", { CornerRadius = UDim.new(0, 5), Parent = button })
+	local dropdownApi = {}
+
+	do
+		local saved = LoadFeature(definition.saveKey)
+		if definition.multi and type(saved) == "table" then
+			selectedSet = {}
+			for _, option in ipairs(choices) do
+				if saved[option] == true then
+					selectedSet[option] = true
+				end
+			end
+			button.Text = multiButtonText()
+			task.defer(function()
+				if not Cleanup.alive then return end
+				pcall(function()
+					if definition.onChange then definition.onChange(selectedSet) end
+				end)
+			end)
+		elseif not definition.multi and type(saved) == "string" then
+			for index, option in ipairs(choices) do
+				if option == saved and index ~= selected then
+					selected, button.Text = index, option
+					task.defer(function()
+						if not Cleanup.alive then return end
+						pcall(function()
+							if definition.onChange then definition.onChange(option, index) end
+						end)
+					end)
+					break
+				end
+			end
+		end
+	end
+
+	function dropdownApi:Refresh(newChoices, preferredValue)
+		if type(newChoices) ~= "table" then return button.Text end
+		local previousValue = not definition.multi and choices[selected] or nil
+		choices = newChoices
+		if definition.multi then
+			local filtered = {}
+			for _, option in ipairs(choices) do
+				if selectedSet[option] then filtered[option] = true end
+			end
+			selectedSet = filtered
+			button.Text = multiButtonText()
+		else
+			local wanted = preferredValue or previousValue
+			selected = 1
+			if wanted ~= nil then
+				for index, option in ipairs(choices) do
+					if option == wanted then
+						selected = index
+						break
+					end
+				end
+			end
+			selected = math.clamp(selected, 1, math.max(#choices, 1))
+			button.Text = choices[selected] or "—"
+		end
+		ClosePopup()
+		return button.Text
+	end
+
+	function dropdownApi:GetValue()
+		if definition.multi then
+			local out = {}
+			for option, isOn in pairs(selectedSet) do
+				if isOn == true then out[option] = true end
+			end
+			return out
+		end
+		return choices[selected]
+	end
+
+	function dropdownApi:SetValue(option)
+		if definition.multi then return false end
+		for index, item in ipairs(choices) do
+			if item == option then
+				selected, button.Text = index, option
+				SaveFeature(definition.saveKey, option)
+				if definition.onChange then definition.onChange(option, index) end
+				return true
+			end
+		end
+		return false
+	end
+
+	Connect(button.Activated, function()
+		local wasThisButton = Win.activePopupButton == button
+		if Win.activePopup then ClosePopup() end
+		if wasThisButton then return end
+		local pos = button.AbsolutePosition - Win.PopupLayer.AbsolutePosition
+		local height = math.max(28, math.min(#choices * 28, 168))
+		local popupSize = Win.PopupLayer.AbsoluteSize
+		local popupX = math.clamp(pos.X, 4, math.max(4, popupSize.X - button.AbsoluteSize.X - 4))
+		local popupY = pos.Y + button.AbsoluteSize.Y + 3
+		if popupY + height > popupSize.Y - 4 then popupY = math.max(4, pos.Y - height - 3) end
+		local list = Create("ScrollingFrame", {
+			Size = UDim2.fromOffset(button.AbsoluteSize.X, height),
+			Position = UDim2.fromOffset(popupX, popupY),
+			BackgroundColor3 = Library.Colors.card,
+			BorderSizePixel = 0,
+			ScrollBarThickness = (#choices > 6) and 3 or 0,
+			CanvasSize = UDim2.fromOffset(0, #choices * 28),
+			ZIndex = 60,
+			Parent = Win.PopupLayer,
+		})
+		Create("UICorner", { CornerRadius = UDim.new(0, 5), Parent = list })
+		Create("UIStroke", { Color = Library.Colors.cardStroke, Thickness = 1, Parent = list })
+		for index, option in ipairs(choices) do
+			local optionButton = Create("TextButton", {
+				Size = UDim2.new(1, 0, 0, 28),
+				Position = UDim2.fromOffset(0, (index - 1) * 28),
+				BackgroundColor3 = ((definition.multi and selectedSet[option]) or (not definition.multi and index == selected)) and Library.Colors.controlHover or Library.Colors.card,
+				BorderSizePixel = 0,
+				Text = option,
+				TextColor3 = Library.Colors.text,
+				TextSize = 12,
+				Font = Enum.Font.Gotham,
+				ZIndex = 61,
+				Parent = list,
+			})
+			Connect(optionButton.Activated, function()
+				if definition.multi then
+					if selectedSet[option] then
+						selectedSet[option] = nil
+					else
+						selectedSet[option] = true
+					end
+					optionButton.BackgroundColor3 = selectedSet[option] and Library.Colors.controlHover or Library.Colors.card
+					button.Text = multiButtonText()
+					SaveFeature(definition.saveKey, selectedSet)
+					if definition.onChange then definition.onChange(selectedSet) end
+				else
+					selected, button.Text = index, option
+					ClosePopup()
+					SaveFeature(definition.saveKey, option)
+					if definition.onChange then definition.onChange(option, index) end
+				end
+			end)
+		end
+		Win.activePopup = list
+		Win.activePopupButton = button
+	end)
+
+	return dropdownApi
+end
+
+local function CreateQuickBind(featureName, keyCode)
+	if UserInputService.KeyboardEnabled then
+		Win.keyboardBinds[featureName] = keyCode.Name
+		Library.Config.keyboardBinds = Win.keyboardBinds
+		Library:SaveConfig()
+		return
+	end
+	if Win.bindingButtonRefs[featureName] then return end
+	Win.quickBindCount = Win.quickBindCount + 1
+	local border = Create("Frame", {
+		Name = "Bind_" .. featureName,
+		Size = UDim2.fromOffset(50, 50),
+		Position = UDim2.fromOffset(14, 144 + (Win.quickBindCount - 1) * 58),
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		BorderSizePixel = 0,
+		ZIndex = 41,
+		Parent = Win.BindButtonHolder,
+	})
+	Create("UICorner", { CornerRadius = UDim.new(0, 10), Parent = border })
+	local bindGradient = Create("UIGradient", {
+		Rotation = Win.BorderGradient.Rotation,
+		Color = Win.BorderGradient.Color,
+		Parent = border,
+	})
+	table.insert(Win.bindGradients, bindGradient)
+	AddThemeRefresher(function()
+		if bindGradient.Parent then
+			bindGradient.Color = Win.BorderGradient.Color
+		end
+		Win.refreshBindButtons()
+	end)
+	local button = Create("TextButton", {
+		Size = UDim2.new(1, -6, 1, -6),
+		Position = UDim2.fromOffset(3, 3),
+		BackgroundColor3 = Library.Colors.background,
+		BorderSizePixel = 0,
+		TextColor3 = Library.Colors.text,
+		TextSize = 9,
+		TextWrapped = true,
+		Font = Enum.Font.GothamBold,
+		AutoButtonColor = false,
+		ZIndex = 42,
+		Parent = border,
+	})
+	Create("UICorner", { CornerRadius = UDim.new(0, 8), Parent = button })
+	Win.bindingButtonRefs[featureName] = button
+
+	local dragging, wasDragged, dragInput, dragStart, bindStartPosition = false, false, nil, nil, nil
+	Connect(button.InputBegan, function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging, wasDragged, dragInput = true, false, input
+			dragStart, bindStartPosition = input.Position, border.Position
+		end
+	end)
+	Connect(UserInputService.InputChanged, function(input)
+		local isMouseMove = dragInput and dragInput.UserInputType == Enum.UserInputType.MouseButton1
+			and input.UserInputType == Enum.UserInputType.MouseMovement
+		if dragging and (input == dragInput or isMouseMove) then
+			local delta = input.Position - dragStart
+			if delta.Magnitude > 4 then wasDragged = true end
+			local view = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(800, 600)
+			local x = math.clamp(bindStartPosition.X.Offset + delta.X, 4, view.X - 54)
+			local y = math.clamp(bindStartPosition.Y.Offset + delta.Y, 4, view.Y - 54)
+			border.Position = UDim2.fromOffset(x, y)
+		end
+	end)
+	Connect(UserInputService.InputEnded, function(input)
+		if input == dragInput then dragging, dragInput = false, nil end
+	end)
+	Connect(button.Activated, function()
+		if not wasDragged then
+			local setter = Win.featureToggleSetters[featureName]
+			if setter then setter(not Win.featureStates[featureName]) end
+		end
+	end)
+	Win.refreshBindButtons()
+end
+
+local function RemoveQuickBind(featureName)
+	Win.keyboardBinds[featureName] = nil
+	Library.Config.keyboardBinds = Win.keyboardBinds
+	Library:SaveConfig()
+	local button = Win.bindingButtonRefs[featureName]
+	if button and button.Parent then button.Parent:Destroy() end
+	Win.bindingButtonRefs[featureName] = nil
+end
+
+local function GetBindableFeatures()
+	local options = {}
+	for name in pairs(Win.featureToggleSetters) do table.insert(options, name) end
+	table.sort(options)
+	return options
+end
+
+local function MakeBindManager(parent)
+	local manager = Create("Frame", { Size = UDim2.new(1, 0, 0, 50), BackgroundTransparency = 1, Parent = parent })
+	Create("TextLabel", {
+		Size = UDim2.new(1, 0, 0, 16),
+		BackgroundTransparency = 1,
+		Text = "Функция для бинда",
+		TextColor3 = Library.Colors.muted,
+		TextSize = 10,
+		Font = Enum.Font.Gotham,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = manager,
+	})
+
+	local bindOptions = GetBindableFeatures()
+	local selected = bindOptions[1] or ""
+	local keyNames = { "Q", "E", "R", "T", "F", "G", "Z", "X", "C", "V", "B", "One", "Two", "Three", "Four", "Five" }
+	local selectedKey = Enum.KeyCode.Q
+	local selectorWidth = UserInputService.KeyboardEnabled and 0.4 or 0.56
+	local selectorHolder = Create("Frame", {
+		Size = UDim2.new(selectorWidth, -3, 0, 27),
+		Position = UDim2.fromOffset(0, 18),
+		BackgroundTransparency = 1,
+		Parent = manager,
+	})
+	MakeDropdown(selectorHolder, {
+		options = bindOptions,
+		defaultIndex = 1,
+		noSave = true,
+		onChange = function(name) selected = name end,
+	})
+	if UserInputService.KeyboardEnabled then
+		local keyHolder = Create("Frame", {
+			Size = UDim2.new(0.26, -3, 0, 27),
+			Position = UDim2.new(0.4, 3, 0, 18),
+			BackgroundTransparency = 1,
+			Parent = manager,
+		})
+		MakeDropdown(keyHolder, {
+			options = keyNames,
+			defaultIndex = 1,
+			noSave = true,
+			onChange = function(name) selectedKey = Enum.KeyCode[name] end,
+		})
+	end
+	local addButton = Create("TextButton", {
+		Size = UserInputService.KeyboardEnabled and UDim2.new(0.34, -3, 0, 26) or UDim2.new(0.44, -3, 0, 26),
+		Position = UserInputService.KeyboardEnabled and UDim2.new(0.66, 3, 0, 19) or UDim2.new(0.56, 3, 0, 19),
+		BackgroundColor3 = Library.Colors.control,
+		BorderSizePixel = 0,
+		Text = "Забиндить",
+		TextColor3 = Library.Colors.text,
+		TextSize = 10,
+		Font = Enum.Font.GothamBold,
+		AutoButtonColor = false,
+		Parent = manager,
+	})
+	Create("UICorner", { CornerRadius = UDim.new(0, 5), Parent = addButton })
+
+	local list = Create("ScrollingFrame", {
+		Size = UDim2.new(1, 0, 0, 59),
+		Position = UDim2.fromOffset(0, 50),
+		Visible = false,
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 2,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		Parent = manager,
+	})
+	Create("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder, Parent = list })
+	local rows = {}
+	local function addRow(featureName, keyCode)
+		if rows[featureName] then return end
+		if not Win.featureToggleSetters[featureName] then return end
+		list.Visible = true
+		manager.Size = UDim2.new(1, 0, 0, 112)
+		parent.Size = UDim2.new(1, 0, 0, 112)
+		local bindKey = keyCode or selectedKey
+		if UserInputService.KeyboardEnabled then
+			local savedKeyName = Win.keyboardBinds[featureName]
+			if not keyCode and type(savedKeyName) == "string" then
+				local ok, savedKey = pcall(function() return Enum.KeyCode[savedKeyName] end)
+				if ok and savedKey then bindKey = savedKey end
+			end
+		end
+		CreateQuickBind(featureName, bindKey)
+		local row = Create("Frame", {
+			Size = UDim2.new(1, 0, 0, 27),
+			BackgroundColor3 = Library.Colors.control,
+			BorderSizePixel = 0,
+			Parent = list,
+		})
+		Create("UICorner", { CornerRadius = UDim.new(0, 5), Parent = row })
+		Create("TextLabel", {
+			Size = UDim2.new(1, -72, 1, 0),
+			Position = UDim2.fromOffset(8, 0),
+			BackgroundTransparency = 1,
+			Text = UserInputService.KeyboardEnabled and (featureName .. " — " .. bindKey.Name) or featureName,
+			TextColor3 = Library.Colors.text,
+			TextSize = 11,
+			Font = Enum.Font.Gotham,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = row,
+		})
+		local deleteButton = Create("TextButton", {
+			Size = UDim2.fromOffset(62, 21),
+			Position = UDim2.new(1, -66, 0.5, -10),
+			BackgroundColor3 = Color3.fromRGB(91, 48, 52),
+			BorderSizePixel = 0,
+			Text = "Удалить",
+			TextColor3 = Library.Colors.text,
+			TextSize = 10,
+			Font = Enum.Font.GothamBold,
+			AutoButtonColor = false,
+			Parent = row,
+		})
+		Create("UICorner", { CornerRadius = UDim.new(0, 4), Parent = deleteButton })
+		rows[featureName] = row
+		Connect(deleteButton.Activated, function()
+			RemoveQuickBind(featureName)
+			if rows[featureName] then rows[featureName]:Destroy() end
+			rows[featureName] = nil
+			if next(rows) == nil then
+				list.Visible = false
+				manager.Size = UDim2.new(1, 0, 0, 50)
+				parent.Size = UDim2.new(1, 0, 0, 50)
+			end
+		end)
+	end
+	Connect(addButton.Activated, function() addRow(selected) end)
+
+	if UserInputService.KeyboardEnabled then
+		for featureName, keyName in pairs(Win.keyboardBinds) do
+			if Win.featureToggleSetters[featureName] and type(keyName) == "string" then
+				local ok, keyCode = pcall(function() return Enum.KeyCode[keyName] end)
+				if ok and keyCode then addRow(featureName, keyCode) end
+			end
+		end
+	end
+end
+
+local function CreateCard(parent, title, options)
+	local card = Create("Frame", {
+		BackgroundColor3 = Library.Colors.card,
+		BorderSizePixel = 0,
+		ClipsDescendants = true,
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Size = UDim2.new(1, 0, 0, 0),
+		Parent = parent,
+	})
+	Create("UICorner", { CornerRadius = UDim.new(0, 8), Parent = card })
+	Create("UIStroke", { Color = Library.Colors.cardStroke, Thickness = 1, Parent = card })
+	Create("UIPadding", {
+		PaddingTop = UDim.new(0, 9),
+		PaddingBottom = UDim.new(0, 9),
+		PaddingLeft = UDim.new(0, 10),
+		PaddingRight = UDim.new(0, 10),
+		Parent = card,
+	})
+	local layout = Create("UIListLayout", { Padding = UDim.new(0, 7), SortOrder = Enum.SortOrder.LayoutOrder, Parent = card })
+	local header = Create("Frame", { Size = UDim2.new(1, 0, 0, 22), BackgroundTransparency = 1, Parent = card })
+	local divider = Create("Frame", {
+		Size = UDim2.new(1, 0, 0, 1),
+		BackgroundColor3 = Library.Colors.divider,
+		BorderSizePixel = 0,
+		Parent = card,
+	})
+
+	if options and options.Toggle then
+		divider.Visible = false
+		Create("TextLabel", {
+			Size = UDim2.new(1, -50, 1, 0),
+			BackgroundTransparency = 1,
+			Text = title,
+			TextColor3 = Library.Colors.text,
+			TextSize = 14,
+			Font = Enum.Font.GothamBold,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = header,
+		})
+		local holder = Create("Frame", {
+			Size = UDim2.fromOffset(42, 22),
+			Position = UDim2.new(1, -42, 0, 0),
+			BackgroundTransparency = 1,
+			Parent = header,
+		})
+		MakeToggle(holder, {
+			default = options.Toggle.Default or false,
+			onChange = options.Toggle.Callback,
+			saveKey = title,
+		})
+	else
+		local expanded = true
+		local titleButton = Create("TextButton", {
+			Size = UDim2.new(1, -26, 1, 0),
+			BackgroundTransparency = 1,
+			Text = title,
+			TextColor3 = Library.Colors.text,
+			TextSize = 14,
+			Font = Enum.Font.GothamBold,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			AutoButtonColor = false,
+			Parent = header,
+		})
+		local arrow = Create("ImageButton", {
+			Size = UDim2.fromOffset(18, 18),
+			Position = UDim2.new(1, -20, 0, 2),
+			BackgroundTransparency = 1,
+			Image = "rbxassetid://4509268602",
+			Parent = header,
+		})
+		local animationId = 0
+		local function setExpanded(value)
+			animationId = animationId + 1
+			local thisAnimation = animationId
+			local startHeight = card.AbsoluteSize.Y
+			expanded = value
+			arrow.Image = expanded and "rbxassetid://4509268602" or "rbxassetid://4509267080"
+			card.AutomaticSize = Enum.AutomaticSize.None
+			card.Size = UDim2.new(1, 0, 0, startHeight)
+			if expanded then
+				for _, child in ipairs(card:GetChildren()) do
+					if child:IsA("GuiObject") and child ~= header then child.Visible = true end
+				end
+			end
+			task.defer(function()
+				task.defer(function()
+					if not card.Parent or thisAnimation ~= animationId then return end
+					local targetHeight = expanded and layout.AbsoluteContentSize.Y + 18 or 40
+					Animate(card, { Size = UDim2.new(1, 0, 0, targetHeight) }, 0.28)
+					task.delay(0.29, function()
+						if not card.Parent or thisAnimation ~= animationId then return end
+						if not expanded then
+							for _, child in ipairs(card:GetChildren()) do
+								if child:IsA("GuiObject") and child ~= header then child.Visible = false end
+							end
+						end
+						card.AutomaticSize = Enum.AutomaticSize.Y
+					end)
+				end)
+			end)
+		end
+		Connect(titleButton.Activated, function() setExpanded(not expanded) end)
+		Connect(arrow.Activated, function() setExpanded(not expanded) end)
+	end
+
+	return card
+end
+
+local function CreateControlRow(card, definition)
+	if definition.type == "BindManager" then
+		local bindRow = Create("Frame", { Size = UDim2.new(1, 0, 0, 50), BackgroundTransparency = 1, Parent = card })
+		MakeBindManager(bindRow)
+		return { Row = bindRow }
+	end
+
+	local row = Create("Frame", { Size = UDim2.new(1, 0, 0, 38), BackgroundTransparency = 1, Parent = card })
+	definition.row = row
+	local label = Create("TextLabel", {
+		Size = UDim2.new(0.42, -4, 1, 0),
+		BackgroundTransparency = 1,
+		Text = definition.label or "",
+		TextColor3 = Library.Colors.text,
+		TextSize = 12,
+		Font = Enum.Font.GothamBold,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Center,
+		TextWrapped = true,
+		Parent = row,
+	})
+	local control = Create("Frame", {
+		Size = definition.fullWidth and UDim2.new(1, 0, 1, 0) or UDim2.new(0.58, -4, 1, 0),
+		Position = definition.fullWidth and UDim2.new() or UDim2.new(0.42, 4, 0, 0),
+		BackgroundTransparency = 1,
+		Parent = row,
+	})
+	if definition.fullWidth then label.Visible = false end
+
+	local api
+	if definition.type == "Text" then
+		label.Size = UDim2.new(1, 0, 1, 0)
+		label.Text = definition.text or definition.label or ""
+		label.Font = Enum.Font.Gotham
+		control.Visible = false
+		api = { Label = label }
+	elseif definition.type == "Toggle" then
+		api = MakeToggle(control, definition)
+	elseif definition.type == "Slider" then
+		api = MakeSlider(control, definition)
+	elseif definition.type == "Dropdown" then
+		api = MakeDropdown(control, definition)
+	elseif definition.type == "Button" then
+		local action = Create("TextButton", {
+			Size = UDim2.new(1, 0, 0, 26),
+			Position = UDim2.new(0, 0, 0.5, -13),
+			BackgroundColor3 = Library.Colors.control,
+			BorderSizePixel = 0,
+			Text = definition.buttonText or "Выполнить",
+			TextColor3 = Library.Colors.text,
+			TextSize = 12,
+			Font = Enum.Font.GothamBold,
+			AutoButtonColor = false,
+			Parent = control,
+		})
+		Create("UICorner", { CornerRadius = UDim.new(0, 5), Parent = action })
+		Connect(action.Activated, function()
+			if definition.callback then definition.callback(action) end
+		end)
+		api = {
+			Button = action,
+			SetText = function(self, text) action.Text = text end,
+			SetColor = function(self, color) action.BackgroundColor3 = color end,
+		}
+	end
+	return api
+end
+
+local function EscapeXml(text)
+	return tostring(text):gsub("[<>&]", { ["<"] = "&lt;", [">"] = "&gt;", ["&"] = "&amp;" })
+end
+
+local function BuildWindow(options)
+	options = options or {}
+	local windowTitle = tostring(options.Title or "Avalon")
+	local windowSubtitle = tostring(options.Subtitle or "")
+	local windowIcon = options.Icon or "rbxassetid://9213540777"
+	local windowSize = options.Size or UDim2.fromScale(0.84, 0.58)
+	local minSize = options.MinSize or Vector2.new(290, 220)
+	local maxSize = options.MaxSize or Vector2.new(520, 360)
+	local openKeybind = options.Keybind
+	if openKeybind == nil then openKeybind = Enum.KeyCode.RightShift end
+
+	
+	Win.themeObjects = { accent = {} }
+	Win.themeRefreshers = {}
+	Win.tabIconMap = {}
+	Win.tabs = {}
+	Win.activeTab = nil
+	Win.featureToggleSetters = {}
+	Win.featureStates = {}
+	Win.bindingButtonRefs = {}
+	Win.keyboardBinds = Library.Config.keyboardBinds or {}
+	Win.activePopup = nil
+	Win.activePopupButton = nil
+	Win.quickBindCount = 0
+	Win.bindGradients = {}
+	Win.openKeybind = openKeybind
+	Win.refreshBindButtons = function()
+		for featureName, button in pairs(Win.bindingButtonRefs) do
+			if button and button.Parent then
+				local enabled = Win.featureStates[featureName] == true
+				button.Text = featureName
+				button.BackgroundColor3 = enabled and ActiveColor or Library.Colors.background
+			end
+		end
+	end
+
+	
+	Win.GuiParent = GetSafeGuiParent()
+	while not Win.GuiParent do
+		task.wait(0.1)
+		Win.GuiParent = GetSafeGuiParent()
+	end
+	Win.LocalPlayer = Players.LocalPlayer
+	if not Win.LocalPlayer then
+		local lpSignal = Players:GetPropertyChangedSignal("LocalPlayer")
+		while not Players.LocalPlayer do
+			lpSignal:Wait()
+		end
+		Win.LocalPlayer = Players.LocalPlayer
+	end
+	Win.PlayerGui = Win.LocalPlayer:FindFirstChildOfClass("PlayerGui") or Win.LocalPlayer:WaitForChild("PlayerGui", 5)
+	CleanupOldGuis(Win.GuiParent)
+	if Win.PlayerGui and Win.GuiParent ~= Win.PlayerGui then
+		CleanupOldGuis(Win.PlayerGui)
+	end
+
+	
+	Win.ScreenGui = Create("ScreenGui", {
+		Name = "AvalonLibHub",
+		ResetOnSpawn = false,
+		IgnoreGuiInset = true,
+		DisplayOrder = 999,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		Parent = Win.GuiParent,
+	})
+	Win.LauncherGui = Create("ScreenGui", {
+		Name = "AvalonLibLauncher",
+		ResetOnSpawn = false,
+		IgnoreGuiInset = true,
+		DisplayOrder = 1001,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		Parent = Win.GuiParent,
+	})
+	Win.PopupLayer = Create("Frame", {
+		Name = "PopupLayer",
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		Active = false,
+		ZIndex = 50,
+		Parent = Win.ScreenGui,
+	})
+
+	
+	Win.Main = Create("Frame", {
+		Name = "Main",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(Library.Config.menu.xScale or 0.5, Library.Config.menu.xOffset or 0, Library.Config.menu.yScale or 0.5, Library.Config.menu.yOffset or 0),
+		Size = windowSize,
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		BorderSizePixel = 0,
+		ClipsDescendants = false,
+		Parent = Win.ScreenGui,
+	})
+	Create("UISizeConstraint", {
+		MinSize = minSize,
+		MaxSize = maxSize,
+		Parent = Win.Main,
+	})
+	Create("UICorner", { CornerRadius = UDim.new(0, 9), Parent = Win.Main })
+	Create("UIScale", { Scale = 1, Parent = Win.Main })
+
+	local oldMenuBlur = Lighting:FindFirstChild("AvalonMenuBlur")
+	if oldMenuBlur then oldMenuBlur:Destroy() end
+	Win.MenuBlur = Create("BlurEffect", { Name = "AvalonMenuBlur", Size = 28, Enabled = true, Parent = Lighting })
+
+	Win.BorderGradient = Create("UIGradient", {
+		Rotation = 0,
+		Color = ColorSequence.new(Library.Colors.accent, Library.Colors.accent),
+		Parent = Win.Main,
+	})
+
+	
+	Win.LauncherBorder = Create("Frame", {
+		Name = "MenuLauncherBorder",
+		Size = UDim2.fromOffset(50, 50),
+		Position = UDim2.fromOffset(14, 84),
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		BorderSizePixel = 0,
+		ZIndex = 40,
+		Parent = Win.LauncherGui,
+	})
+	Create("UICorner", { CornerRadius = UDim.new(0, 10), Parent = Win.LauncherBorder })
+	Win.LauncherGradient = Create("UIGradient", {
+		Rotation = 0,
+		Color = ColorSequence.new(Library.Colors.accent, Library.Colors.accent),
+		Parent = Win.LauncherBorder,
+	})
+	Win.Launcher = Create("TextButton", {
+		Size = UDim2.new(1, -6, 1, -6),
+		Position = UDim2.fromOffset(3, 3),
+		BackgroundColor3 = Library.Colors.background,
+		BorderSizePixel = 0,
+		Text = "≡",
+		TextColor3 = Library.Colors.text,
+		TextSize = 28,
+		Font = Enum.Font.GothamBold,
+		AutoButtonColor = false,
+		ZIndex = 41,
+		Parent = Win.LauncherBorder,
+	})
+	Create("UICorner", { CornerRadius = UDim.new(0, 8), Parent = Win.Launcher })
+
+	Win.Inner = Create("Frame", {
+		Size = UDim2.new(1, -4, 1, -4),
+		Position = UDim2.fromOffset(2, 2),
+		BackgroundColor3 = Library.Colors.background,
+		BorderSizePixel = 0,
+		ClipsDescendants = true,
+		Parent = Win.Main,
+	})
+	Create("UICorner", { CornerRadius = UDim.new(0, 8), Parent = Win.Inner })
+	Win.Shimmer = Create("Frame", {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = Library.Colors.accent,
+		BackgroundTransparency = 0.46,
+		BorderSizePixel = 0,
+		Active = false,
+		ZIndex = 45,
+		Parent = Win.Inner,
+	})
+	Win.ShimmerGradient = Create("UIGradient", {
+		Rotation = 18,
+		Color = ColorSequence.new(Library.Colors.accent, Library.Colors.accent),
+		Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 1),
+			NumberSequenceKeypoint.new(0.38, 1),
+			NumberSequenceKeypoint.new(0.5, 0.58),
+			NumberSequenceKeypoint.new(0.62, 1),
+			NumberSequenceKeypoint.new(1, 1),
+		}),
+		Parent = Win.Shimmer,
+	})
+
+	
+	Win.launcherDragging, Win.launcherWasDragged, Win.launcherInput, Win.launcherStart, Win.launcherPosition = false, false, nil, nil, nil
+	Connect(Win.Launcher.InputBegan, function(input)
+		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+			Win.launcherDragging, Win.launcherWasDragged, Win.launcherInput = true, false, input
+			Win.launcherStart, Win.launcherPosition = input.Position, Win.LauncherBorder.Position
+		end
+	end)
+	Connect(UserInputService.InputChanged, function(input)
+		local mouseMove = Win.launcherInput and Win.launcherInput.UserInputType == Enum.UserInputType.MouseButton1 and input.UserInputType == Enum.UserInputType.MouseMovement
+		if Win.launcherDragging and (input == Win.launcherInput or mouseMove) then
+			local delta = input.Position - Win.launcherStart
+			if delta.Magnitude > 4 then Win.launcherWasDragged = true end
+			local viewport = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(800, 600)
+			Win.LauncherBorder.Position = UDim2.fromOffset(
+				math.clamp(Win.launcherPosition.X.Offset + delta.X, 4, viewport.X - 54),
+				math.clamp(Win.launcherPosition.Y.Offset + delta.Y, 4, viewport.Y - 54)
+			)
+		end
+	end)
+	Connect(UserInputService.InputEnded, function(input)
+		if input == Win.launcherInput then
+			Win.launcherDragging, Win.launcherInput = false, nil
+			Win.launcherWasDragged = false
+		end
+	end)
+
+	Win.menuRestPosition = Win.Main.Position
+	Win.menuTransitionId = 0
+	Win.menuIsOpen = true
+	Win.menuTween = nil
+
+	Connect(Win.Launcher.Activated, function()
+		ToggleMainMenu()
+	end)
+	Win.LauncherBorder.Visible = true
+
+	
+	Connect(UserInputService.InputBegan, function(input)
+		if Win.openKeybind and UserInputService.KeyboardEnabled
+			and input.KeyCode == Win.openKeybind and not UserInputService:GetFocusedTextBox() then
+			ToggleMainMenu()
+		end
+	end)
+
+	
+	Win.Header = Create("Frame", {
+		Size = UDim2.new(1, 0, 0, 44),
+		BackgroundTransparency = 1,
+		Active = true,
+		Parent = Win.Inner,
+	})
+	Create("ImageLabel", {
+		Size = UDim2.fromOffset(26, 26),
+		Position = UDim2.fromOffset(10, 9),
+		BackgroundTransparency = 1,
+		Image = windowIcon,
+		ScaleType = Enum.ScaleType.Fit,
+		Parent = Win.Header,
+	})
+	local function titleRichText()
+		if windowSubtitle and windowSubtitle ~= "" then
+			return "<font size='18'>" .. EscapeXml(windowTitle) .. "</font> <font size='12' color='rgb(175,175,185)'>" .. EscapeXml(windowSubtitle) .. "</font>"
+		end
+		return "<font size='18'>" .. EscapeXml(windowTitle) .. "</font>"
+	end
+	Win.TitleLabel = Create("TextLabel", {
+		Size = UDim2.new(1, -52, 1, 0),
+		Position = UDim2.fromOffset(44, 0),
+		BackgroundTransparency = 1,
+		RichText = true,
+		Text = titleRichText(),
+		TextColor3 = Library.Colors.text,
+		Font = Enum.Font.GothamBold,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = Win.Header,
+	})
+	Win.PingLabel = Create("TextLabel", {
+		Size = UDim2.fromOffset(68, 22),
+		Position = UDim2.new(1, -76, 0, 11),
+		BackgroundTransparency = 1,
+		Text = "-- ms",
+		TextColor3 = Library.Colors.muted,
+		TextSize = 10,
+		Font = Enum.Font.GothamBold,
+		TextXAlignment = Enum.TextXAlignment.Right,
+		ZIndex = 46,
+		Parent = Win.Header,
+	})
+	Create("Frame", {
+		Size = UDim2.new(1, 0, 0, 1),
+		Position = UDim2.new(0, 0, 1, -1),
+		BackgroundColor3 = Library.Colors.divider,
+		BorderSizePixel = 0,
+		Parent = Win.Header,
+	})
+
+	
+	Win.draggingWindow, Win.windowDragInput, Win.dragOrigin, Win.startPosition = false, nil, nil, nil
+	local function clampWindowPosition(position)
+		local viewport = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(800, 600)
+		local size = Win.Main.AbsoluteSize
+		local targetX = viewport.X * position.X.Scale + position.X.Offset
+		local targetY = viewport.Y * position.Y.Scale + position.Y.Offset
+		targetX = math.clamp(targetX, -size.X / 2 + 35, viewport.X - size.X / 2 - 35)
+		targetY = math.clamp(targetY, -size.Y / 2 + 20, viewport.Y - size.Y / 2 - 20)
+		return UDim2.new(position.X.Scale, targetX - viewport.X * position.X.Scale,
+			position.Y.Scale, targetY - viewport.Y * position.Y.Scale)
+	end
+	Connect(Win.Header.InputBegan, function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			Win.draggingWindow = true
+			Win.windowDragInput = input
+			Win.dragOrigin = input.Position
+			Win.startPosition = Win.Main.Position
+		end
+	end)
+	Connect(UserInputService.InputChanged, function(input)
+		local isMouseMove = Win.windowDragInput and Win.windowDragInput.UserInputType == Enum.UserInputType.MouseButton1
+			and input.UserInputType == Enum.UserInputType.MouseMovement
+		if Win.draggingWindow and (input == Win.windowDragInput or isMouseMove) then
+			local delta = input.Position - Win.dragOrigin
+			Win.Main.Position = clampWindowPosition(UDim2.new(
+				Win.startPosition.X.Scale, Win.startPosition.X.Offset + delta.X,
+				Win.startPosition.Y.Scale, Win.startPosition.Y.Offset + delta.Y
+			))
+		end
+	end)
+	Connect(UserInputService.InputEnded, function(input)
+		if input == Win.windowDragInput then
+			Win.draggingWindow, Win.windowDragInput = false, nil
+			if Win.Main.Visible then
+				Win.menuRestPosition = Win.Main.Position
+				Library.Config.menu = {
+					xScale = Win.Main.Position.X.Scale,
+					xOffset = Win.Main.Position.X.Offset,
+					yScale = Win.Main.Position.Y.Scale,
+					yOffset = Win.Main.Position.Y.Offset,
+				}
+				Library:SaveConfig()
+			end
+		end
+	end)
+
+	
+	Win.LeftPanel = Create("ScrollingFrame", {
+		Size = UDim2.new(0, 72, 1, -44),
+		Position = UDim2.fromOffset(0, 44),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 2,
+		ScrollBarImageColor3 = Library.Colors.muted,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		Parent = Win.Inner,
+	})
+	Create("UIPadding", {
+		PaddingTop = UDim.new(0, 10),
+		PaddingLeft = UDim.new(0, 8),
+		PaddingRight = UDim.new(0, 6),
+		Parent = Win.LeftPanel,
+	})
+	Create("UIListLayout", {
+		Padding = UDim.new(0, 8),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		Parent = Win.LeftPanel,
+	})
+	Win.RightPanel = Create("ScrollingFrame", {
+		Size = UDim2.new(1, -72, 1, -44),
+		Position = UDim2.fromOffset(72, 44),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 3,
+		ScrollBarImageColor3 = Library.Colors.muted,
+		CanvasSize = UDim2.new(),
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		Parent = Win.Inner,
+	})
+
+	
+	Connect(UserInputService.InputBegan, function(input)
+		if not Win.activePopup or (input.UserInputType ~= Enum.UserInputType.Touch and input.UserInputType ~= Enum.UserInputType.MouseButton1) then return end
+		local point = input.Position
+		local ok, insidePopup = pcall(function()
+			local function inside(gui)
+				if not gui or not gui.Parent then return false end
+				local p, s = gui.AbsolutePosition, gui.AbsoluteSize
+				return point.X >= p.X and point.X <= p.X + s.X and point.Y >= p.Y and point.Y <= p.Y + s.Y
+			end
+			return inside(Win.activePopup) or inside(Win.activePopupButton)
+		end)
+		if ok and not insidePopup then ClosePopup() end
+	end)
+
+	
+	Win.BindButtonHolder = Create("Frame", {
+		Name = "QuickBinds",
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		ZIndex = 40,
+		Parent = Win.ScreenGui,
+	})
+
+	
+	Connect(UserInputService.InputBegan, function(input, processed)
+		if processed or not UserInputService.KeyboardEnabled or UserInputService:GetFocusedTextBox() then return end
+		for featureName, keyCode in pairs(Win.keyboardBinds) do
+			if input.KeyCode.Name == keyCode then
+				local setter = Win.featureToggleSetters[featureName]
+				if setter then setter(not Win.featureStates[featureName]) end
+			end
+		end
+	end)
+
+	
+	local function AddTab(name, tabIcon)
+		local page = Create("Frame", {
+			Size = UDim2.new(1, -12, 0, 1),
+			Position = UDim2.fromOffset(6, 8),
+			BackgroundTransparency = 1,
+			Visible = false,
+			Parent = Win.RightPanel,
+		})
+		local leftColumn = Create("Frame", { Size = UDim2.new(0.49, 0, 1, 0), BackgroundTransparency = 1, Parent = page })
+		local rightColumn = Create("Frame", {
+			Size = UDim2.new(0.49, 0, 1, 0),
+			Position = UDim2.new(0.51, 0, 0, 0),
+			BackgroundTransparency = 1,
+			Parent = page,
+		})
+		local leftLayout = Create("UIListLayout", { Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder, Parent = leftColumn })
+		local rightLayout = Create("UIListLayout", { Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder, Parent = rightColumn })
+
+		local customHeight = nil
+		local function updatePageHeight()
+			local height
+			if customHeight then
+				height = customHeight
+			else
+				height = math.max(leftLayout.AbsoluteContentSize.Y, rightLayout.AbsoluteContentSize.Y)
+			end
+			page.Size = UDim2.new(1, -12, 0, math.max(1, height))
+			if page.Visible then
+				Win.RightPanel.CanvasSize = UDim2.fromOffset(0, 24 + math.max(1, height))
+			end
+		end
+		Connect(leftLayout:GetPropertyChangedSignal("AbsoluteContentSize"), updatePageHeight)
+		Connect(rightLayout:GetPropertyChangedSignal("AbsoluteContentSize"), updatePageHeight)
+
+		local nextColumn = 0
+		local function addCard(title, column, options)
+			local targetColumn
+			if column == "left" then
+				targetColumn = leftColumn
+			elseif column == "right" then
+				targetColumn = rightColumn
+			else
+				nextColumn = nextColumn + 1
+				targetColumn = (nextColumn % 2 == 1) and leftColumn or rightColumn
+			end
+			local card = CreateCard(targetColumn, title, options)
+			task.defer(updatePageHeight)
+			return card
+		end
+
+		local tabButton = MakeButton(Win.LeftPanel, name, tabIcon)
+		local tab = {
+			Name = name,
+			page = page,
+			button = tabButton,
+			leftColumn = leftColumn,
+			rightColumn = rightColumn,
+			leftLayout = leftLayout,
+			rightLayout = rightLayout,
+			updatePageHeight = updatePageHeight,
+			addCard = addCard,
+		}
+		
+		tab.Page = page
+		tab.Button = tabButton
+		tab.LeftColumn = leftColumn
+		tab.RightColumn = rightColumn
+		function tab:SetCustomHeight(height)
+			customHeight = height
+			updatePageHeight()
+		end
+		function tab:Switch()
+			SwitchTab(name)
+			task.defer(updatePageHeight)
+		end
+
+		function tab:AddSection(title, columnOrOptions)
+			local column, options
+			if type(columnOrOptions) == "table" then
+				options = columnOrOptions
+			elseif type(columnOrOptions) == "string" then
+				column = columnOrOptions
+			end
+			local card = addCard(title, column, options)
+			local sectionApi = {
+				Title = title,
+				Card = card,
+			}
+			local rowCounter = 0
+			local function push(definition)
+				rowCounter = rowCounter + 1
+				if definition.saveKey == nil and definition.noSave ~= true
+					and (definition.type == "Toggle" or definition.type == "Slider" or definition.type == "Dropdown") then
+					local labelPart = definition.label or definition.bindName or definition.placeholder or ""
+					labelPart = tostring(labelPart):gsub("\n", " ")
+					definition.saveKey = title .. "/" .. rowCounter .. "/" .. labelPart
+				end
+				local api = CreateControlRow(card, definition)
+				task.defer(updatePageHeight)
+				return api
+			end
+
+			function sectionApi:AddToggle(opts)
+				opts = opts or {}
+				return push({
+					type = "Toggle",
+					label = opts.Text,
+					default = opts.Default,
+					saveKey = opts.Save,
+					noSave = opts.NoSave,
+					bindName = opts.Bind,
+					onChange = opts.Callback,
+				})
+			end
+			function sectionApi:AddSlider(opts)
+				opts = opts or {}
+				local sliderDefault = opts.Default
+				if sliderDefault == nil then sliderDefault = opts.Min or 0 end
+				return push({
+					type = "Slider",
+					label = opts.Text,
+					min = opts.Min or 0,
+					max = opts.Max or 100,
+					default = sliderDefault,
+					saveKey = opts.Save,
+					noSave = opts.NoSave,
+					fullWidth = opts.FullWidth,
+					onChange = opts.Callback,
+				})
+			end
+			function sectionApi:AddDropdown(opts)
+				opts = opts or {}
+				local defaultIndex = opts.DefaultIndex
+				if defaultIndex == nil and type(opts.Default) == "number" then
+					defaultIndex = opts.Default
+				end
+				local defaultSelected = nil
+				if opts.Multi and type(opts.Default) == "table" then
+					defaultSelected = opts.Default
+				end
+				if defaultIndex == nil and type(opts.Default) == "string" and type(opts.Options) == "table" then
+					for i, option in ipairs(opts.Options) do
+						if option == opts.Default then
+							defaultIndex = i
+							break
+						end
+					end
+				end
+				return push({
+					type = "Dropdown",
+					label = opts.Text,
+					options = opts.Options or {},
+					defaultIndex = defaultIndex or 1,
+					defaultSelected = defaultSelected,
+					multi = opts.Multi or false,
+					placeholder = opts.Placeholder or "Выбрать",
+					saveKey = opts.Save,
+					noSave = opts.NoSave,
+					fullWidth = opts.FullWidth,
+					onChange = opts.Callback,
+				})
+			end
+			function sectionApi:AddButton(opts)
+				opts = opts or {}
+				return push({
+					type = "Button",
+					label = opts.Text,
+					buttonText = opts.ButtonText or "Выполнить",
+					fullWidth = opts.FullWidth,
+					callback = opts.Callback,
+				})
+			end
+			function sectionApi:AddText(text)
+				return push({ type = "Text", text = tostring(text) })
+			end
+			function sectionApi:AddBindManager()
+				return push({ type = "BindManager" })
+			end
+			function sectionApi:AddThemeDropdown(opts)
+				opts = opts or {}
+				local currentTheme = Library.Config.theme or "Зеленая"
+				local defaultIndex = 1
+				for i, name in ipairs(Library.ThemeOrder) do
+					if name == currentTheme then
+						defaultIndex = i
+						break
+					end
+				end
+				return push({
+					type = "Dropdown",
+					label = opts.Text or "Тема",
+					options = Library.ThemeOrder,
+					defaultIndex = defaultIndex,
+					noSave = true,
+					fullWidth = opts.FullWidth,
+					onChange = function(name) ApplyTheme(name) end,
+				})
+			end
+			return sectionApi
+		end
+
+		Win.tabs[name] = tab
+		Connect(tabButton.Activated, function()
+			SwitchTab(name)
+			task.defer(updatePageHeight)
+		end)
+		return tab
+	end
+
+	
+	local windowApi = {}
+	function windowApi:AddTab(name, tabIcon)
+		return AddTab(name, tabIcon)
+	end
+	function windowApi:SetTheme(name)
+		ApplyTheme(name)
+	end
+	function windowApi:SetOpen(open)
+		if open == Win.menuIsOpen then return end
+		ToggleMainMenu()
+	end
+	function windowApi:Toggle()
+		ToggleMainMenu()
+	end
+	function windowApi:SetKeybind(keyCode)
+		Win.openKeybind = keyCode
+	end
+	function windowApi:SetTitle(title, subtitle)
+		windowTitle = tostring(title or windowTitle)
+		if subtitle ~= nil then windowSubtitle = tostring(subtitle) end
+		Win.TitleLabel.Text = titleRichText()
+	end
+	function windowApi:GetConfig()
+		return Library.Config
+	end
+	function windowApi:GetActiveTab()
+		return Win.activeTab
+	end
+	function windowApi:Destroy()
+		Library:Destroy()
+	end
+	windowApi.Main = Win.Main
+	windowApi.Inner = Win.Inner
+	windowApi.Header = Win.Header
+	windowApi.ScreenGui = Win.ScreenGui
+	windowApi.LauncherGui = Win.LauncherGui
+	windowApi.Launcher = Win.Launcher
+	windowApi.LauncherBorder = Win.LauncherBorder
+	windowApi.PopupLayer = Win.PopupLayer
+	windowApi.LeftPanel = Win.LeftPanel
+	windowApi.RightPanel = Win.RightPanel
+	windowApi.PingLabel = Win.PingLabel
+	windowApi.MenuBlur = Win.MenuBlur
+	windowApi.BindButtonHolder = Win.BindButtonHolder
+	windowApi.Tabs = Win.tabs
+	Win.windowApi = windowApi
+
+	
+	Win.anim = { rotation = 0, shimmer = -1, ping = 0 }
+	Connect(RunService.Heartbeat, function(dt)
+		if Win.Main and Win.Main.Parent then
+			if os.clock() >= Win.anim.ping then
+				Win.anim.ping = os.clock() + 0.75
+				local ok, ping = pcall(function()
+					return math.round(game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue())
+				end)
+				Win.PingLabel.Text = ok and (tostring(ping) .. " ms") or "-- ms"
+			end
+			Win.anim.rotation = (Win.anim.rotation + dt * 78) % 360
+			Win.BorderGradient.Rotation = Win.anim.rotation
+			Win.LauncherGradient.Rotation = Win.anim.rotation
+			local offset = Vector2.new(math.sin(math.rad(Win.anim.rotation)) * 0.82, 0)
+			Win.BorderGradient.Offset = offset
+			Win.LauncherGradient.Offset = offset
+			Win.anim.shimmer = Win.anim.shimmer + dt * 0.34
+			if Win.anim.shimmer > 1 then Win.anim.shimmer = -1 end
+			Win.ShimmerGradient.Offset = Vector2.new(Win.anim.shimmer, 0)
+			for index = #Win.bindGradients, 1, -1 do
+				local gradient = Win.bindGradients[index]
+				if gradient and gradient.Parent then
+					gradient.Rotation = Win.anim.rotation
+					gradient.Offset = offset
+				else
+					table.remove(Win.bindGradients, index)
+				end
+			end
+		end
+	end)
+
+	
+	local function ensureGuiAlive()
+		if not Cleanup.alive then return end
+		local targetParent = GetSafeGuiParent() or Win.GuiParent
+		if not Win.ScreenGui or not Win.ScreenGui.Parent or Win.ScreenGui.Parent ~= targetParent then
+			pcall(function() Win.ScreenGui.Parent = targetParent end)
+		end
+		if Win.ScreenGui and not Win.ScreenGui.Enabled then pcall(function() Win.ScreenGui.Enabled = true end) end
+		if Win.ScreenGui and Win.ScreenGui.ResetOnSpawn then pcall(function() Win.ScreenGui.ResetOnSpawn = false end) end
+		if not Win.LauncherGui or not Win.LauncherGui.Parent or Win.LauncherGui.Parent ~= targetParent then
+			pcall(function() Win.LauncherGui.Parent = targetParent end)
+		end
+		if Win.LauncherGui and not Win.LauncherGui.Enabled then pcall(function() Win.LauncherGui.Enabled = true end) end
+		pcall(function()
+			if Win.PopupLayer and Win.PopupLayer.Parent ~= Win.ScreenGui then Win.PopupLayer.Parent = Win.ScreenGui end
+			if Win.BindButtonHolder and Win.BindButtonHolder.Parent ~= Win.ScreenGui then Win.BindButtonHolder.Parent = Win.ScreenGui end
+			if Win.Main and Win.Main.Parent ~= Win.ScreenGui then Win.Main.Parent = Win.ScreenGui end
+			if Win.LauncherBorder and Win.LauncherBorder.Parent ~= Win.LauncherGui then Win.LauncherBorder.Parent = Win.LauncherGui end
+		end)
+		pcall(function()
+			if not Win.MenuBlur or not Win.MenuBlur.Parent then
+				local old = Lighting:FindFirstChild("AvalonMenuBlur")
+				if old then old:Destroy() end
+				Win.MenuBlur = Create("BlurEffect", {
+					Name = "AvalonMenuBlur",
+					Size = Win.menuIsOpen and 28 or 0,
+					Enabled = Win.menuIsOpen,
+					Parent = Lighting,
+				})
+			end
+		end)
+	end
+	Connect(RunService.Heartbeat, function() pcall(ensureGuiAlive) end)
+	task.spawn(function()
+		while Cleanup.alive and task.wait(2) do
+			pcall(ensureGuiAlive)
+		end
+	end)
+	for _, gui in ipairs({ Win.ScreenGui, Win.LauncherGui }) do
+		pcall(function()
+			Connect(gui:GetPropertyChangedSignal("Parent"), function()
+				task.defer(function() if Cleanup.alive then pcall(ensureGuiAlive) end end)
+			end)
+			Connect(gui.AncestryChanged, function(_, p)
+				if p == nil then
+					task.defer(function() if Cleanup.alive then pcall(ensureGuiAlive) end end)
+				end
+			end)
+		end)
+	end
+	pcall(function()
+		Connect(Win.PlayerGui.ChildRemoved, function(child)
+			if child == Win.ScreenGui or child == Win.LauncherGui then
+				task.defer(function() if Cleanup.alive then pcall(ensureGuiAlive) end end)
+			end
+		end)
+	end)
+
+	
+	SwitchTab("Игрок")
+	ApplyTheme(options.Theme or Library.Config.theme or "Зеленая")
+	pcall(function()
+		Win.menuIsOpen = true
+		Win.Main.Visible = true
+		Win.LauncherBorder.Visible = true
+		if Win.MenuBlur then
+			Win.MenuBlur.Enabled = true
+			Win.MenuBlur.Size = 28
+		end
+	end)
+
+	return windowApi
+end
+
+function Library:CreateWindow(options)
+	Library:_Reset()
+	Cleanup.alive = true
+	Library.ConfigName = tostring((options or {}).ConfigName or "AvalonLib")
+	LoadConfigFile()
+	return BuildWindow(options or {})
+end
+
+function Library:_Reset()
+	
+	
+	
+	Cleanup.alive = false
+	saveScheduled = false
+	pcall(function()
+		if Library.OnDestroy then Library.OnDestroy() end
+	end)
+	for _, connection in ipairs(Cleanup.connections) do
+		pcall(function() connection:Disconnect() end)
+	end
+	table.clear(Cleanup.connections)
+	if Win.ScreenGui then pcall(function() Win.ScreenGui:Destroy() end) end
+	if Win.LauncherGui then pcall(function() Win.LauncherGui:Destroy() end) end
+	local blur = Lighting:FindFirstChild("AvalonMenuBlur")
+	if blur then pcall(function() blur:Destroy() end) end
+	Win = {}
+	ActiveColor = Library.Colors.accent
+	activeSliderToken = nil
+	Library.Config = defaultConfig()
+	Library.ConfigName = "AvalonLib"
+end
+
+function Library:Destroy()
+	Library:_Reset()
+	if SharedEnv.AvalonLibraryCleanup == Library._cleanupHandle then
+		SharedEnv.AvalonLibraryCleanup = nil
+	end
+end
+
+function Library:SetTheme(name)
+	if Win.windowApi then
+		ApplyTheme(name)
+	end
+end
+
+Library._cleanupHandle = function()
+	Library:Destroy()
+end
+SharedEnv.AvalonLibraryCleanup = Library._cleanupHandle
+
+return Library
